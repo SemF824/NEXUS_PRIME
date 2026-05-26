@@ -1,11 +1,11 @@
-#main.py
-import textwrap
+# executives/main.py
 import asyncio
 import sqlite3
 import datetime
 import warnings
 import sys
 import re
+import textwrap
 from ollama import AsyncClient
 
 from nexus_config import DB_PATH, MODEL_DIALOGUE
@@ -133,35 +133,25 @@ class NexusAgenticSystem:
         if not self.llm_en_ligne:
             return "EN_COURS", "Décrivez votre urgence et votre adresse."
 
-        # LE CERVEAU RECALIBRÉ : Few-Shot + Style Militaire + Exigence d'Accès
-        prompt = f"""Rôle : Régulateur des urgences (SAMU/112). Ton ton est MILITAIRE, SEC et DIRECT.
+        # LE CERVEAU RECALIBRÉ : Loi du "Need-to-Know". Zéro fioriture, zéro présentation.
+        prompt = f"""Rôle : Régulateur SAMU/112.
 Domaine : {domaine}
-
-TRANSCRIPTION DE L'APPEL :
+Transcription de l'appel :
 {transcript}
 
-MISSION : Le dossier est validé uniquement si les 3 informations suivantes sont obtenues :
-1. LE DANGER : Nature de l'urgence (symptôme, blessure).
-2. LA RUE / LE LIEU : Rue, avenue, ou repère majeur (Gare).
-3. L'ACCÈS EXACT : Étage, appartement, digicode (ou précision si lieu public).
+OBJECTIF : Obtenir le DANGER (symptômes) et l'ADRESSE COMPLÈTE (rue/repère + accès).
 
-INSTRUCTIONS STRICTES :
-- AUCUNE POLITESSE. N'utilise JAMAIS "Monsieur", "Veuillez", "Pour nous aider".
-- Phrase de 15 mots maximum. Va à l'essentiel.
-- Si le client a donné la rue (ex: 19 place de Serbie) MAIS pas l'étage/code, EXIGE l'accès direct.
-- Si les 3 éléments (Danger + Rue + Accès) sont validés, écris UNIQUEMENT la balise : ###CLOS###
+RÈGLES OPÉRATIONNELLES STRICTES :
+1. ZÉRO PRÉSENTATION : Ne dis JAMAIS qui tu es, ni "Ici le SAMU". Pose directement ta question.
+2. ZÉRO BAVARDAGE : Ta réponse doit faire moins de 15 mots. Sois incisif.
+3. ZÉRO AIDE NON SOLLICITÉE : Ne donne AUCUN exemple à l'appelant (ne dis pas "Voyez-vous une plaque ?") SAUF s'il déclare explicitement "Je ne sais pas" ou "Je suis perdu".
+4. EMPATHIE CHIRURGICALE : Si le client annonce une douleur, dis juste "C'est noté" ou "Restez calme", puis demande l'adresse. Rien de plus.
+5. VOUVOIEMENT : Toujours "Vous".
+6. CLÔTURE : Dès que l'adresse complète et le danger sont connus, génère UNIQUEMENT : ###CLOS###
 
-EXEMPLES DE COMPORTEMENT ATTENDU :
-Client : "J'ai mal au coeur, je suis au 12 rue de Paris."
-Ta réponse : Êtes-vous en maison ou appartement ? Quel étage et quel code ?
-
-Client : "Au 3ème étage, code 1234."
-Ta réponse : ###CLOS###
-
-Génère uniquement ta réplique parlée ou ###CLOS### :"""
+Réponds directement à la dernière phrase du client :"""
 
         try:
-            # Rallongement du timeout à 25 secondes pour éviter le crash sur les longs transcripts
             reponse = await asyncio.wait_for(
                 self.client_llm.chat(model=MODEL_DIALOGUE, messages=[{'role': 'user', 'content': prompt}],
                                      options={'temperature': 0.15}),
@@ -172,21 +162,23 @@ Génère uniquement ta réplique parlée ou ###CLOS### :"""
             if "###CLOS###" in contenu:
                 if domaine in ["MÉDICAL", "POLICE", "POMPIER"]:
                     if not self.verifier_presence_localisation(texte_utilisateur):
-                        return "EN_COURS", "Donnez-moi un nom de rue ou un repère physique clair pour l'ambulance."
+                        return "EN_COURS", "J'ai besoin d'une adresse. Où vous trouvez-vous exactement ?"
                 return "COMPLET", ""
 
+            # Nettoyage des éventuels préfixes générés par le modèle
             contenu = contenu.replace("###CLOS###", "").strip()
-            contenu = re.sub(r'^(Régulateur\s*:|Ta réponse\s*:|Réponse\s*:|:\s*|"\s*)', '', contenu, flags=re.IGNORECASE).strip('" ')
+            contenu = re.sub(r'^(Régulateur\s*:|Client\s*:|Ta réponse\s*:|Réponse\s*:|:\s*|"\s*)', '', contenu,
+                             flags=re.IGNORECASE).strip('" ')
             contenu = re.sub(r'\(.*?\)', '', contenu).strip()
 
             return "EN_COURS", contenu
 
         except asyncio.TimeoutError:
             print("\n   [SYSTEM WARN] ⚠️ Timeout du LLM (Temps de réponse > 25s).")
-            return "EN_COURS", "Liaison instable. Répétez votre position et la situation."
+            return "EN_COURS", "Liaison instable. Répétez votre position et la situation, s'il vous plaît."
         except Exception as e:
             print(f"\n   [SYSTEM ERROR] ⚠️ Crash LLM : {e}")
-            return "EN_COURS", "Liaison instable. Répétez votre position et la situation."
+            return "EN_COURS", "Je vous entends mal. Pouvez-vous répéter où vous vous trouvez ?"
 
     async def extraire_domaines_secondaires(self, texte_utilisateur, domaine_principal):
         if not self.llm_en_ligne or domaine_principal in ["NON_URGENT", "EN_ATTENTE"]: return []
@@ -271,11 +263,19 @@ async def run_terminal():
                     domaine_maitre = domaine_courant
 
             if not skip_generation:
-                statut, question_bot = await nexus.generer_question_bot(transcript, ticket_final, domaine_maitre, score_maitre)
+                statut, question_bot = await nexus.generer_question_bot(transcript, ticket_final, domaine_maitre,
+                                                                        score_maitre)
                 if statut == "COMPLET":
                     ticket_complet = True
                     break
-                print(f"   🤖 NEXUS ({domaine_maitre} | Score: {score_maitre}/10) : {question_bot}")
+
+                wrapped_bot = textwrap.fill(
+                    f"🤖 NEXUS ({domaine_maitre} | Score: {score_maitre}/10) : {question_bot}",
+                    width=70,
+                    initial_indent="   ",
+                    subsequent_indent="      "
+                )
+                print(wrapped_bot)
 
             skip_generation = False
 
@@ -294,7 +294,8 @@ async def run_terminal():
                         ticket_complet = True
                         break
 
-                elif domaine_maitre in ["CYBERSÉCURITÉ", "ÉNERGIE & INFRASTRUCTURES", "TRANSPORT & MOBILITÉ"] and score_maitre >= 5:
+                elif domaine_maitre in ["CYBERSÉCURITÉ", "ÉNERGIE & INFRASTRUCTURES",
+                                        "TRANSPORT & MOBILITÉ"] and score_maitre >= 5:
                     if silence_count == 1:
                         print("   🤖 NEXUS (RELANCE TECHNIQUE) : Liaison instable. Êtes-vous en ligne ?")
                         skip_generation = True
@@ -329,7 +330,8 @@ async def run_terminal():
 
         if ticket_final == "exit": break
 
-        if silence_count >= 3 and domaine_maitre not in ["MÉDICAL", "POLICE", "POMPIER", "CYBERSÉCURITÉ", "ÉNERGIE & INFRASTRUCTURES"]:
+        if silence_count >= 3 and domaine_maitre not in ["MÉDICAL", "POLICE", "POMPIER", "CYBERSÉCURITÉ",
+                                                         "ÉNERGIE & INFRASTRUCTURES"]:
             print("-" * 70 + "\n📝 En attente du prochain appelant...\n")
             continue
 
