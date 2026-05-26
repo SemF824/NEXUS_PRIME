@@ -25,7 +25,7 @@ COPY . /app
 RUN chmod +x /app/start.sh
 
 # 7. Exposer le port de l'API Web (8000) et d'Ollama (11434)
-EXPOSE 8000 11434
+EXPOSE 7860 11434
 
 # 8. Commande de lancement (Le chef d'orchestre)
 CMD ["/app/start.sh"]

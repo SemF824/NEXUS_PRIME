@@ -13,4 +13,4 @@ ollama pull mistral
 echo "🚀 [3/3] Démarrage de l'API NEXUS (FastAPI)..."
 cd executives
 # On lance le serveur web Uvicorn
-uvicorn api:app --host 0.0.0.0 --port 8000
+uvicorn api:app --host 0.0.0.0 --port 7860
