@@ -1,4 +1,5 @@
 # nexus_core.py
+import torch
 from sklearn.base import BaseEstimator, TransformerMixin
 from sentence_transformers import SentenceTransformer
 
@@ -17,7 +18,10 @@ class TextEncoder(BaseEstimator, TransformerMixin):
 
     def _get_encoder(self):
         if not hasattr(self, '_encoder') or self._encoder is None:
-            self._encoder = SentenceTransformer(self.model_name)
+            # Détection automatique et allocation sur la puce NVIDIA L4
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"⚙️ Allocation de l'encodeur sémantique sur le périphérique : {device.upper()}")
+            self._encoder = SentenceTransformer(self.model_name, device=device)
         return self._encoder
 
     def __getstate__(self):
