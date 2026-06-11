@@ -1,56 +1,62 @@
-# api.py
+# executives/api.py
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from main import NexusMainSystem  # On importe ton chef-d'oeuvre !
+from main import NexusAgenticSystem
 
-# 1. Initialisation de l'application Web et de l'IA
-app = FastAPI(title="NEXUS Prime API", description="Moteur de triage d'urgence", version="28.0")
-nexus = NexusMainSystem()
+# 1. Initialisation de l'application Web et de l'IA Agentique
+app = FastAPI(title="NEXUS Prime API", description="Moteur de triage d'urgence 100% Local (Mistral)", version="35.0")
+nexus = NexusAgenticSystem()
 
-# 2. Autoriser ton futur site web à communiquer avec cette API (CORS)
+# 2. Configuration du Middleware CORS pour ton futur Front-End
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Plus tard, tu mettras l'URL de ton site ici
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# 3. Déclenchement automatique du pré-chauffage de Mistral à l'allumage du serveur
+@app.on_event("startup")
+async def startup_event():
+    print("🔥 [STARTUP] Activation de l'écoute asynchrone du LLM (Mistral 7B)...")
+    await nexus.prechauffer_cerveau()
 
-# 3. Définition du format de données attendu depuis le site web
+# 4. Schéma des données d'entrée attendues
 class TicketRequest(BaseModel):
     texte: str
-    force_score: bool = False
 
-
-# 4. La route principale (L'URL que ton site va appeler)
+# 5. Route principale de routage tactique
 @app.post("/api/evaluer")
-def evaluer_ticket_api(request: TicketRequest):
-    # On passe le texte à ton moteur existant
-    (domaine, score, raisons, ticket_complet,
-     dom_brut, imp_brut, urg_brut, conf) = nexus.evaluer_ticket(request.texte, request.force_score)
-
-    # Détermination de l'alerte visuelle
+async def evaluer_ticket_api(request: TicketRequest):
+    # Évaluation en temps réel via ton moteur Scikit-Learn / Formule logique
+    domaine, score, friction = nexus.evaluator.evaluer_ticket(request.texte)
     niveau = "🔴 CRITIQUE" if score >= 8 else "🟠 HAUTE" if score >= 5 else "🟢 BASSE"
 
-    # On renvoie une belle structure JSON au site web
-    if not ticket_complet:
+    # Si des données vitales manquent (comme la localisation)
+    if friction != "COMPLET":
+        # Génération chirurgicale de la relance par Mistral
+        statut, question_bot = await nexus.generer_question_bot(
+            transcript=f"Client: {request.texte}", 
+            texte_utilisateur=request.texte, 
+            domaine=domaine, 
+            score_actuel=score
+        )
         return {
             "statut": "INCOMPLET",
             "domaine_pressenti": domaine,
-            "question_ia": raisons[0],  # La question que le site devra afficher dans le chat
-            "donnees_brutes": {"confiance": conf}
+            "question_ia": question_bot,
+            "friction_detectee": friction
         }
     else:
-        # On logge en BDD car le ticket est fini
-        nexus.logger.log(request.texte, request.texte, dom_brut, imp_brut, urg_brut, conf)
+        # Si le dossier est complet, enregistrement en BDD et clôture
+        nexus.logger.log(request.texte, domaine, [], score, statut="CLOS")
         return {
             "statut": "COMPLET",
             "resultat": {
                 "domaine_final": domaine,
                 "score_sur_10": score,
-                "niveau_alerte": niveau,
-                "explications": raisons
+                "niveau_alerte": niveau
             }
         }
